@@ -4,6 +4,56 @@ document.addEventListener("DOMContentLoaded", () => {
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
 
+  // Helper to create a participant list item (text + delete button)
+  function createParticipantListItem(activityName, email) {
+    const li = document.createElement("li");
+    li.className = "participant-item";
+
+    const span = document.createElement("span");
+    span.textContent = email;
+    li.appendChild(span);
+
+    const btn = document.createElement("button");
+    btn.className = "delete-participant";
+    btn.title = `Unregister ${email}`;
+    btn.textContent = "✖";
+    btn.addEventListener("click", async () => {
+      try {
+        const res = await fetch(
+          `/activities/${encodeURIComponent(activityName)}/unregister?email=${encodeURIComponent(email)}`,
+          { method: "DELETE" }
+        );
+        const result = await res.json();
+        if (res.ok) {
+          messageDiv.textContent = result.message;
+          messageDiv.className = "success";
+          messageDiv.classList.remove("hidden");
+          // Refresh activities so participants list and availability update
+          fetchActivities();
+        } else {
+          messageDiv.textContent = result.detail || "An error occurred";
+          messageDiv.className = "error";
+          messageDiv.classList.remove("hidden");
+        }
+        // Hide message after 5 seconds
+        setTimeout(() => {
+          messageDiv.classList.add("hidden");
+        }, 5000);
+      } catch (error) {
+        console.error("Error unregistering:", error);
+        messageDiv.textContent = "Failed to unregister. Please try again.";
+        messageDiv.className = "error";
+        messageDiv.classList.remove("hidden");
+        setTimeout(() => {
+          messageDiv.classList.add("hidden");
+        }, 5000);
+      }
+    });
+
+    li.appendChild(btn);
+    return li;
+  }
+
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
@@ -13,6 +63,9 @@ document.addEventListener("DOMContentLoaded", () => {
       // Clear loading message
       activitiesList.innerHTML = "";
 
+      // Clear and reset select options to avoid duplicates
+      activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
+
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
         const activityCard = document.createElement("div");
@@ -20,6 +73,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const spotsLeft = details.max_participants - details.participants.length;
 
+        // Main activity content
         activityCard.innerHTML = `
           <h4>${name}</h4>
           <p>${details.description}</p>
@@ -27,6 +81,32 @@ document.addEventListener("DOMContentLoaded", () => {
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
         `;
 
+        // Participants section (built with DOM methods to keep safe)
+        const participantsDiv = document.createElement("div");
+        participantsDiv.className = "participants";
+
+        const participantsTitle = document.createElement("h5");
+        participantsTitle.textContent = "Participants";
+        participantsDiv.appendChild(participantsTitle);
+
+        const participants = details.participants || [];
+
+        if (participants.length > 0) {
+          const ul = document.createElement("ul");
+          ul.className = "participants-list";
+          participants.forEach((p) => {
+            const li = createParticipantListItem(name, p);
+            ul.appendChild(li);
+          });
+          participantsDiv.appendChild(ul);
+        } else {
+          const noP = document.createElement("p");
+          noP.className = "no-participants";
+          noP.textContent = "No participants yet";
+          participantsDiv.appendChild(noP);
+        }
+
+        activityCard.appendChild(participantsDiv);
         activitiesList.appendChild(activityCard);
 
         // Add option to select dropdown
@@ -61,7 +141,37 @@ document.addEventListener("DOMContentLoaded", () => {
       if (response.ok) {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
+
+        // Optimistically update UI so user sees their signup immediately
+        // Reset the form first so the select is cleared for usability
         signupForm.reset();
+
+        // Try to find the activity card for the signed-up activity and append the new participant
+        const cards = activitiesList.querySelectorAll('.activity-card');
+        cards.forEach((card) => {
+          const title = card.querySelector('h4');
+          if (title && title.textContent === activity) {
+            const participantsDiv = card.querySelector('.participants');
+            if (participantsDiv) {
+              let ul = participantsDiv.querySelector('.participants-list');
+              if (!ul) {
+                const noP = participantsDiv.querySelector('.no-participants');
+                ul = document.createElement('ul');
+                ul.className = 'participants-list';
+                if (noP) {
+                  participantsDiv.replaceChild(ul, noP);
+                } else {
+                  participantsDiv.appendChild(ul);
+                }
+              }
+              const li = createParticipantListItem(activity, email);
+              ul.appendChild(li);
+            }
+          }
+        });
+
+        // Refresh activities so participants list and availability update (authoritative source)
+        fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
